@@ -1,0 +1,1 @@
+"""Checkout thumbnail example package."""
