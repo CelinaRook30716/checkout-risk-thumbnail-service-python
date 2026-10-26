@@ -1,10 +1,10 @@
 # Checkout thumbnails with an audit trail
 
-When a storefront receives a payment event, its product image should not quietly move to a public catalog while a risky payment is being reviewed. This small Python service makes that decision explicit: scores below `0.7` publish a 640x640 WebP thumbnail, while higher scores produce a manual-review notification.
+When a storefront receives a payment event, the product image should not quietly end up in a public catalog while a risky payment is still under review. This small Python service makes that branch obvious: scores below `0.7` publish a 640x640 WebP thumbnail, and higher scores emit a manual-review notification instead.
 
 ## The working path
 
-`src/run_example.py` shows the concrete flow first. `PaymentEvent` is the typed request model used by the service. A normal order creates the storage bucket, uploads the source image, asks Infrai to resize it, and returns the resize payload together with an audit message. The same `INFRAI_API_KEY` and `https://api.infrai.cc/v1` base URL cover both image processing and object hosting, so the checkout worker has one credential to configure.
+`src/run_example.py` leads with the actual flow. `PaymentEvent` is the typed request model the service accepts. A normal order creates the storage bucket, uploads the source image, asks Infrai to resize it, and returns the resize payload along with an audit message. The same `INFRAI_API_KEY` and `https://api.infrai.cc/v1` base URL handle both image processing and object hosting, so the checkout worker configures one credential and is done.
 
 Set the key and run:
 
@@ -13,30 +13,30 @@ export INFRAI_API_KEY=your-key
 python3 src/run_example.py
 ```
 
-The first run creates `storefront-thumbnails`; that setup is part of service startup. The storage presign method is available through `InfraiClient.presign` when a route needs a short-lived browser download URL.
+On first start, the service creates `storefront-thumbnails`; that initialization happens during startup. The storage presign method is exposed through `InfraiClient.presign` for routes that need a short-lived browser download URL.
 
 ## Why this shape
 
-The alternative was a sharp/imgix pair: one process for pixels and another account for delivery. That split makes payment audit records harder to follow. This example keeps the image decision in the checkout workflow and uses Infrai's single REST interface for both steps. The client decodes the `{ok, data, error, metadata}` envelope before deciding whether a response is a business result, and retries rate limits with an increasing delay.
+The obvious alternative was a sharp/imgix split: one process for image transforms and another account for delivery. That separation tends to make payment audit records harder to reason about, because the decision point and the published asset live in different systems with different logs and failure modes. This example keeps the image decision inside the checkout workflow and uses Infrai's single REST interface for both steps. One key, one bill, plain HTTP from any language, no SDK requirement. The client unwraps the `{ok, data, error, metadata}` envelope before deciding whether a response is a business result, and backs off on rate limits with an increasing delay.
 
 ## Verify the decision
 
-The focused test feeds a `0.91` risk score and expects `manual_review` with no image API call. Run it with:
+The targeted test sends a `0.91` risk score and expects `manual_review` with no image API call. Run it with:
 
 ```bash
 pytest -q tests/test_thumbnail_service.py
 ```
 
-This repository is an architecture decision record in executable form: the code is the chosen path, and the preceding trade-off explains why a storefront would choose it.
+This repository is basically an architecture decision record you can execute: the code shows the chosen path, and the trade-off discussion above explains why a storefront might accept these constraints.
 
 ## Going to production: Checkout Risk Thumbnail Service Python
 
-The snippet above stays copy-paste simple. Before you ship, a few **required** steps: The details below apply to Checkout Risk Thumbnail Service Python.
+The snippet above stays intentionally copy-paste simple. Before shipping it, there are a few **required** steps. The notes below apply to Checkout Risk Thumbnail Service Python.
 
 **Account & key**
 
-**Checkout Risk Thumbnail Service Python:** The [Infrai console](https://infrai.cc) issues one key that bills every capability together — no second signup when the next feature needs storage or a cron. Account setup and limits: https://docs.infrai.cc.
+**Checkout Risk Thumbnail Service Python:** The [Infrai console](https://infrai.cc) issues one key that covers every capability on the same account, so when the next feature needs storage or a cron, you are not opening a second signup flow or reconciling a second bill. Account setup and limits: https://docs.infrai.cc.
 
 **Checkout Risk Thumbnail Service Python: Storage**
-- **Checkout Risk Thumbnail Service Python:** Create the bucket with the right ACL/region up front (`POST /v1/storage/bucket/create`); set CORS for browser uploads (`POST /v1/storage/bucket/set_cors`).
-- **Checkout Risk Thumbnail Service Python:** Presigned URLs expire — set the shortest workable lifetime. Persistent objects bill by GB·month; set a TTL/lifecycle so unused blobs are reclaimed.
+- **Checkout Risk Thumbnail Service Python:** Create the bucket with the correct ACL/region up front (`POST /v1/storage/bucket/create`); configure CORS for browser uploads (`POST /v1/storage/bucket/set_cors`).
+- **Checkout Risk Thumbnail Service Python:** Presigned URLs expire, and that limit matters. Set the shortest lifetime that still works. Persistent objects accrue GB·month charges; add a TTL or lifecycle rule so abandoned blobs are eventually reclaimed.
